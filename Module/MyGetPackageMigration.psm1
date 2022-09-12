@@ -166,7 +166,7 @@ function Get-ContentUrls
 
     # Var is used to ensure there aren't multiple requests to package urls
     $Script:registrationRequests = [System.Collections.ArrayList]::new()
-    $packages = (Get-Packages -IndexUrl $IndexUrl -Credential $Credential).id | Select-Object -Unique
+    $packages = (Get-Packages -IndexUrl $IndexUrl -Body $false -Credential $Credential).id | Select-Object -Unique
 
     #TODO need to edit the received packages to make sure I'm only getting the unique packages
     $registrationBaseUrl = Get-RegistrationBase -IndexUrl $IndexUrl -Credential $Credential
@@ -320,7 +320,11 @@ function Get-Packages
 
         [Parameter()]
         [int]
-        $Take = 100
+        $Take = 100,
+
+        [Parameter()]
+        [bool]
+        $Body = $true
     )
 
     $searchBaseUrl = Get-V3SearchBaseURL -IndexUrl $IndexUrl -Credential $Credential
@@ -339,12 +343,28 @@ function Get-Packages
     {
         # Adjust the skip portion of the query to get all packages associated with URL
         $payLoad.Skip = $i * $Take
-        $message = "Request: $searchBaseUrl, Prerelease = $($payload.Prerelease), SemverLevel = $($payload.SemverLevel), Skip =$($payload.Skip), Take = $($payload.Take)"
+        if ($Body)
+        {
+            $searchUrl = $searchBaseUrl
+            $message = "Request: $searchUrl, Prerelease = $($payload.Prerelease), SemverLevel = $($payload.SemverLevel), Skip =$($payload.Skip), Take = $($payload.Take)"
+        }
+        else
+        {    
+            $searchUrl = "${searchBaseUrl}?prerelease=$($payLoad.Prerelease)&semverlevel=$($payLoad.SemverLevel)&skip=$($payLoad.Skip)&take=$($payLoad.Take)"
+            $message = "Request: $searchUrl"
+        }
         Write-Verbose $message
         try
         {
-            $response = Invoke-RestMethod -Uri $searchBaseUrl -Body $payLoad -Credential $Credential
+            if ($Body)
+            {
+                $response = Invoke-RestMethod -Uri $searchUrl -Body $payLoad -Credential $Credential
+            }
+            else {
+                $response = Invoke-RestMethod -Uri $searchUrl -Credential $Credential
+            }
             $packages = $response.data
+            #Write-Verbose "$packages"
             if ($packages.Count -eq 0)
             {
                 break
@@ -359,6 +379,8 @@ function Get-Packages
                         Version = $version.version
                     }
                     $null = $result.add($packageObject)
+                    $message = "Package ID: $($package.Id) Version: $($package.Version)"
+                    Write-Verbose "${message}"
                 }
             }
 
@@ -453,14 +475,14 @@ function Read-CatalogEntry
         $catalogUrl = $Item.'@id'
         $null = $result.AddRange((Read-CatalogUrl -RegistrationUrl $catalogUrl -Credential $Credential))
     }
-    elseif ($itemType -eq 'catalog:CatalogPage')
+    elseif ($itemType -eq 'catalog:CatalogPage' -or $item.items.Count -gt 0)
     {
         foreach ($subItem in $Item.items)
         {
             $null = $result.AddRange((Read-CatalogEntry -Item $subItem -Credential $Credential))
         }
     }
-    elseif ($itemType -eq 'Package')
+    else #if ($itemType -eq 'Package')
     {
         $returnItem = [PSCustomObject]@{
             Name    = $Item.catalogEntry.id
