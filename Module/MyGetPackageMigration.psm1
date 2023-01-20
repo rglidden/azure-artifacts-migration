@@ -364,7 +364,7 @@ function Get-Packages
                 $response = Invoke-RestMethod -Uri $searchUrl -Credential $Credential
             }
             $packages = $response.data
-            #Write-Verbose "$packages"
+            Write-Verbose "$packages"
             if ($packages.Count -eq 0)
             {
                 break
@@ -855,7 +855,7 @@ function Update-NuGetSource
         }
     }
 
-    $sourceUpdate = Start-Command -CommandTitle nuget.exe -CommandArguments "sources Update -Name $FeedName -UserName 'username' -Password $password"
+    $sourceUpdate = Start-Command -CommandTitle 'nuget.exe' -CommandArguments "sources Update -Name $FeedName -UserName $FeedName -Password $password"
 
     if ($sourceUpdate.ExitCode -eq 1)
     {
