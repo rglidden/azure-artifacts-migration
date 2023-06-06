@@ -166,22 +166,9 @@ function Get-ContentUrls
 
     # Var is used to ensure there aren't multiple requests to package urls
     $Script:registrationRequests = [System.Collections.ArrayList]::new()
-    $packages = (Get-Packages -IndexUrl $IndexUrl -Body $false -Credential $Credential).id | Select-Object -Unique
+    $packages = (Get-PackagesV2 -IndexUrl $IndexUrl) #.id | Select-Object -Unique
 
-    #TODO need to edit the received packages to make sure I'm only getting the unique packages
-    $registrationBaseUrl = Get-RegistrationBase -IndexUrl $IndexUrl -Credential $Credential
-    $result = [System.Collections.ArrayList]::new()
-
-    # Collect source package URLs to migrate
-    foreach ($packageName in $packages)
-    {
-        $registrationUrl = "$registrationBaseUrl/$packageName/index.json"
-        $versions = Read-CatalogUrl -RegistrationUrl $registrationUrl -Credential $Credential
-
-        $null = $result.AddRange($versions)
-    }
-
-    return $result
+    return $packages
 }
 
 <#
@@ -289,6 +276,72 @@ function Get-Index
     )
 
     return (Invoke-RestMethod -Uri $IndexUrl -Credential $Credential).resources
+}
+
+function Get-PackagesV2
+{
+    [CmdletBinding()]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [string]
+        $IndexUrl
+    )
+
+    $webClient = New-Object System.Net.WebClient
+    $webClient.UseDefaultCredentials=$true
+
+    # set up feed URL
+    $serviceBase = $IndexUrl
+    $feedUrl = $serviceBase + "Packages"
+
+    $result = [System.Collections.ArrayList]::new()
+
+    While ($true)
+    {
+        Write-Verbose "Source URL: $feedUrl"
+
+        # Download the list of entries
+        $feed = [xml]$webClient.DownloadString($feedUrl)
+        $entries = $feed.feed.entry 
+    
+        # Extract the ID and Version of each entry
+        foreach ($entry in $entries)
+        {
+            if ($entry.title.InnerText -eq "")
+            {
+                Write-Verbose "Skipping entry with empty title."
+                continue;
+            }
+
+            $packageObject = [PSCustomObject]@{
+                Id      = $entry.title.InnerText
+                Name    = $entry.title.InnerText
+                Version = $entry.properties.version
+                Url     = $entry.content.src
+            }
+            $null = $result.add($packageObject)
+            $message = "Package ID: $($packageObject.Id) Version: $($packageObject.Version)"
+            Write-Verbose "${message}"
+        }
+
+        # Use the link to move to the next page
+        $link = $feed.feed.link | Where-Object { $_.rel.startsWith("next") } | Select-Object href
+        # Write-Verbose $link
+        if ($null -ne $link)
+        {
+          # if using a paged url with a $skiptoken like 
+          # http:// ... /Packages?$skiptoken='EnyimMemcached-log4net','2.7'
+          # remember that you need to escape the $ in powershell with `
+          $feedUrl = $link.href
+          continue
+        }
+        else
+        {
+            break
+        }
+    }        
+    return $result
 }
 
 <#
@@ -751,10 +804,12 @@ function Get-MissingVersions
     $missingPackages = [System.Collections.ArrayList]@()
     foreach ($sourceVersion in $SourceVersions)
     {
+        # Write-Verbose "Checking $($sourceVersion.Name) Version: $($sourceVersion.Version) URL: $($sourceVersion.Url)"
         $key = "$($sourceVersion.Name)$sep$($sourceVersion.Version)"
         if (-not $destHash.ContainsKey($key))
         {
             $null = $missingPackages.Add($sourceVersion);
+            # Write-Verbose "Missing $($sourceVersion.Name) Version: $($sourceVersion.Version) URL: $($sourceVersion.Url)"
         }
     }
 
